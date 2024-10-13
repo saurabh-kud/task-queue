@@ -4,8 +4,7 @@
     "description": "Node.js API cluster with task queuing and rate limiting",
     "main": "src/cluster.js",
     "scripts": {
-        "start": "node src/cluster.js",
-        "dev": "nodemon src/app.js"
+        "start": "node src/cluster.js"
     },
     "dependencies": {
         "config": "^3.3.9",
