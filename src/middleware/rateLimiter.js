@@ -1,5 +1,6 @@
 const Redis = require("ioredis");
 const config = require("config");
+const taskQueue = require("../services/taskQueue");
 
 const redis = new Redis(config.get("redis"));
 
@@ -13,6 +14,15 @@ const rateLimiter = async (req, res, next) => {
     const currentTime = Math.floor(Date.now() / 1000);
     const key = `ratelimit:${user_id}`;
 
+    // Check if user_id exists in Redis
+    const userExists = await redis.exists(key);
+
+    if (!userExists) {
+      // If user doesn't exist, add them and proceed
+      await redis.zadd(key, currentTime, currentTime);
+      return next();
+    }
+
     const result = await redis
       .multi()
       .zremrangebyscore(key, "-inf", currentTime - WINDOW_SIZE_IN_SECONDS)
@@ -24,11 +34,10 @@ const rateLimiter = async (req, res, next) => {
     const requestsInWindow = result[3][1];
 
     if (requestsInWindow > MAX_WINDOW_REQUEST_COUNT) {
-      return res.status(429).json({
-        error: "Too many requests",
-        retryAfter:
-          WINDOW_SIZE_IN_SECONDS - (currentTime % WINDOW_SIZE_IN_SECONDS),
-      });
+      // Queue the request to process later
+      await taskQueue.enqueue(user_id);
+      req.queuedForProcessing = true;
+      return next();
     }
 
     // Check for 1 request per second
@@ -37,12 +46,10 @@ const rateLimiter = async (req, res, next) => {
       lastRequestTime &&
       currentTime - lastRequestTime < WINDOW_LOG_INTERVAL_IN_SECONDS
     ) {
-      return res.status(429).json({
-        error: "Too many requests",
-        retryAfter:
-          WINDOW_LOG_INTERVAL_IN_SECONDS -
-          (currentTime % WINDOW_LOG_INTERVAL_IN_SECONDS),
-      });
+      // Queue the request to process later
+      await taskQueue.enqueue(user_id);
+      req.queuedForProcessing = true;
+      return next();
     }
 
     next();
